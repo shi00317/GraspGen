@@ -36,7 +36,6 @@ dependencies = [
     "torch-geometric",
     
     # Core dependencies from requirements.txt
-    "pickle5",
     "h5py",
     "hydra-core", 
     "matplotlib",

@@ -14,7 +14,7 @@ maintainers = [
 ]
 license = {text = "NVIDIA Corporation"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.12"  # spconv wheels only available for Python 3.10-3.11
 keywords = ["robotics", "manipulation", "learning", "computer-vision", "grasping"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -25,9 +25,10 @@ classifiers = [
 ]
 
 dependencies = [
-    # Core PyTorch dependencies with CUDA support
-    "torch==2.1.0",
-    "torchvision==0.16.0", 
+    # Core PyTorch dependencies with CUDA 12.8 support (required for RTX 5080/Blackwell sm_120)
+    # Pinned to 2.7.x to match available PyG pre-built wheels (pt27cu128)
+    "torch>=2.7.0,<2.8.0",
+    "torchvision>=0.22.0,<0.23.0", 
     
     # PyTorch Geometric dependencies (installed from PyG wheel index)  
     "torch-cluster",
@@ -40,7 +41,7 @@ dependencies = [
     "hydra-core", 
     "matplotlib",
     "meshcat",
-    "numpy==1.26.4",
+    "numpy>=1.26.4",
     "webdataset",
     "scikit-learn",
     "scipy",
@@ -48,12 +49,12 @@ dependencies = [
     "trimesh==4.5.3",
     "transformers",
     "tensordict",
-    "diffusers==0.11.1",
-    "timm==1.0.15",
-    "huggingface-hub==0.25.2",
+    "diffusers>=0.11.1",
+    "timm>=1.0.15",
+    "huggingface-hub>=0.25.2",
     "PyOpenGL==3.1.0",
     "addict",
-    "spconv-cu120",
+    "spconv-cu126",  # cu126 is compatible with CUDA 12.8
     "yapf==0.40.1",
     "tensorboardx", 
     "sharedarray",
@@ -72,7 +73,6 @@ dependencies = [
     "msgpack-numpy",
     
     # Pin setuptools to a version that still includes pkg_resources
-    # (required by torch==2.1.0 cpp_extension for building CUDA extensions like pointnet2_ops)
     "setuptools>=45,<78",
 ]
 
@@ -129,8 +129,24 @@ line_length = 88
 prerelease = "allow"
 
 # Use find-links for PyG packages (flat HTML page, not a PEP 503 index)
-find-links = ["https://data.pyg.org/whl/torch-2.1.0+cu121.html"]
+find-links = [
+    "https://data.pyg.org/whl/torch-2.7.0+cu128.html",
+    "https://data.pyg.org/whl/torch-2.7.1+cu128.html",
+]
+
+# Configure PyTorch index for CUDA 12.8 wheels (required for RTX 5080/Blackwell)
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Route torch packages to PyTorch CUDA 12.8 index
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
 
 # Build dependencies for packages that need special build requirements
 [tool.uv.extra-build-dependencies]
 sharedarray = ["setuptools>=45,<78"]
+torch-scatter = ["torch"]
+torch-cluster = ["torch"]

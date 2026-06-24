@@ -10,7 +10,8 @@ echo "🔧 Setting up CUDA environment variables for pointnet2_ops compilation..
 export CC=/usr/bin/g++
 export CXX=/usr/bin/g++
 export CUDAHOSTCXX=/usr/bin/g++
-export TORCH_CUDA_ARCH_LIST="8.6"
+# sm_120 = Blackwell (RTX 5080/5090)
+export TORCH_CUDA_ARCH_LIST="12.0"
 
 echo "✅ CUDA environment configured"
 echo "📦 Installing pointnet2_ops..."

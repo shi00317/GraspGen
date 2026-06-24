@@ -114,7 +114,8 @@ def load_mesh_data(mesh_file, scale, num_sample_points):
         xyz, _ = trimesh.sample.sample_surface(obj, num_sample_points)
         xyz = np.array(xyz)
     else:
-        obj = trimesh.load(mesh_file)
+        # obj = trimesh.load(mesh_file)
+        obj = trimesh.load_mesh(mesh_file, merge_meshes=True)
         obj.apply_scale(scale)
         xyz, _ = trimesh.sample.sample_surface(obj, num_sample_points)
         xyz = np.array(xyz)

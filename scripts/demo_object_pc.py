@@ -70,6 +70,12 @@ def parse_args():
         default=-1,
         help="Number of top grasps to return when return_topk is True",
     )
+    parser.add_argument(
+        "--no_outlier_removal",
+        action="store_true",
+        help="Skip kNN-based outlier removal. Use when the point cloud is very sparse "
+             "or the coordinates are not in meters.",
+    )
 
     return parser.parse_args()
 
@@ -134,13 +140,34 @@ if __name__ == "__main__":
         # Visualize original point cloud
         visualize_pointcloud(vis, "pc", pc_centered, pc_color, size=0.0025)
 
-        # Filter point cloud
-        pc_filtered, pc_removed = point_cloud_outlier_removal(
-            torch.from_numpy(pc_centered)
-        )
-        pc_filtered = pc_filtered.numpy()
-        pc_removed = pc_removed.numpy()
-        visualize_pointcloud(vis, "pc_removed", pc_removed, [255, 0, 0], size=0.003)
+        # Warn if the point cloud looks like a scene rather than a single object
+        bbox = pc_centered.max(axis=0) - pc_centered.min(axis=0)
+        if bbox.max() > 0.5:
+            print(
+                f"Warning: point cloud bounding box is {bbox} (max extent {bbox.max():.3f} m). "
+                "The model expects a single object (~0.1–0.3 m). "
+                "Consider cropping to just the object with --crop in ply_to_demo_json.py."
+            )
+
+        # Filter point cloud (skip when --no_outlier_removal is set)
+        if args.no_outlier_removal:
+            pc_filtered = pc_centered
+            visualize_pointcloud(vis, "pc_removed", np.zeros((1, 3)), [255, 0, 0], size=0.003)
+        else:
+            pc_filtered, pc_removed = point_cloud_outlier_removal(
+                torch.from_numpy(pc_centered)
+            )
+            pc_filtered = pc_filtered.numpy()
+            pc_removed = pc_removed.numpy()
+            visualize_pointcloud(vis, "pc_removed", pc_removed, [255, 0, 0], size=0.003)
+
+            if len(pc_filtered) == 0:
+                print(
+                    "Warning: outlier removal discarded all points "
+                    "(point cloud may be too sparse or coordinates are not in metres). "
+                    "Re-run with --no_outlier_removal to skip this step."
+                )
+                continue
 
         # Run inference on filtered point cloud
         grasps_inferred, grasp_conf_inferred = GraspGenSampler.run_inference(
@@ -149,6 +176,7 @@ if __name__ == "__main__":
             grasp_threshold=args.grasp_threshold,
             num_grasps=args.num_grasps,
             topk_num_grasps=args.topk_num_grasps,
+            remove_outliers=not args.no_outlier_removal,
         )
 
         if len(grasps_inferred) > 0:

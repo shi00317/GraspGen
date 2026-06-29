@@ -20,6 +20,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 ROBOTIQ_2F140_DEPTH_M = 0.1950
 # From the 2F-85 and 2F-140 technical drawings in my_data/robotiq_config:
@@ -104,6 +106,9 @@ def load_json_grasps(path: Path) -> tuple[np.ndarray, np.ndarray, dict[str, Any]
 
 
 def load_isaac_yaml_grasps(path: Path) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    import trimesh.transformations as tra
+    import yaml
+
     with path.open() as f:
         payload = yaml.safe_load(f)
 
@@ -228,15 +233,12 @@ def save_json_output(
 
 
 def main() -> None:
-    global np, tra, yaml, save_to_isaac_grasp_format
-
-    args = parse_args()
-
-    import numpy as np
     import trimesh.transformations as tra
     import yaml
 
     from grasp_gen.dataset.eval_utils import save_to_isaac_grasp_format
+
+    args = parse_args()
 
     input_path = args.input.resolve()
     output_path = (args.output or default_output_path(input_path)).resolve()

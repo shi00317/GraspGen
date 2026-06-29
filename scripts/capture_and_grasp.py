@@ -26,7 +26,7 @@ if __package__ in (None, ""):
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-from camera.workspace import capture_workspace
+from kinova_gen3.camera.workspace import capture_workspace
 
 if __package__:
     from .demo_workspace_grasp import (
@@ -35,7 +35,7 @@ if __package__:
         validate_gripper_config,
     )
 else:
-    from demo_workspace_grasp import (
+    from scripts.demo_workspace_grasp import (
         absolute_path_without_resolving,
         generate_workspace_grasps,
         validate_gripper_config,

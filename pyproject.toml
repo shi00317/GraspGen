@@ -146,8 +146,8 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
-kortex-api = { url = "https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/2.6.0/kortex_api-2.6.0.post3-py3-none-any.whl" }
 sam3 = { git = "https://github.com/shi00317/sam3.git", rev = "main" }
+kortex-api = { url = "https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/3.4.0/kortex_api-3.4.0.5-py3-none-any.whl" }
 
 # Build dependencies for packages that need special build requirements
 [tool.uv.extra-build-dependencies]

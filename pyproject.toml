@@ -76,6 +76,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "einops>=0.8.2",
     "pycocotools>=2.0.11",
+    "hydra-zen>=0.16.1rc1",
 ]
 
 # Note: pointnet2_ops is a local dependency that must be installed separately.
@@ -147,7 +148,7 @@ explicit = true
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 sam3 = { git = "https://github.com/shi00317/sam3.git", rev = "main" }
-kortex-api = { url = "https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/3.4.0/kortex_api-3.4.0.5-py3-none-any.whl" }
+kortex-api = { url = "https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/2.6.0/kortex_api-2.6.0.post3-py3-none-any.whl" }
 
 # Build dependencies for packages that need special build requirements
 [tool.uv.extra-build-dependencies]

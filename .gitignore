@@ -88,3 +88,6 @@ logs/*
 cache/
 misc/*
 data/*
+
+my_data/
+pointnet2_ops/

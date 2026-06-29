@@ -28,16 +28,14 @@ dependencies = [
     # Core PyTorch dependencies with CUDA 12.8 support (required for RTX 5080/Blackwell sm_120)
     # Pinned to 2.7.x to match available PyG pre-built wheels (pt27cu128)
     "torch>=2.7.0,<2.8.0",
-    "torchvision>=0.22.0,<0.23.0", 
-    
-    # PyTorch Geometric dependencies (installed from PyG wheel index)  
+    "torchvision>=0.22.0,<0.23.0",
+    # PyTorch Geometric dependencies (installed from PyG wheel index)
     "torch-cluster",
-    "torch-scatter", 
+    "torch-scatter",
     "torch-geometric",
-    
     # Core dependencies from requirements.txt
     "h5py",
-    "hydra-core", 
+    "hydra-core",
     "matplotlib",
     "meshcat",
     "numpy>=1.26.4",
@@ -55,24 +53,29 @@ dependencies = [
     "addict",
     "spconv-cu126",  # cu126 is compatible with CUDA 12.8
     "yapf==0.40.1",
-    "tensorboardx", 
+    "tensorboardx",
     "sharedarray",
     "yourdfpy==0.0.56",
-    
     # Additional dependencies from pip installation
     "pyrender",
     "scene-synthesizer[recommend]",
     "imageio",
     "pytest",
     "viser",
-    
     # ZMQ serving
     "pyzmq",
     "msgpack",
     "msgpack-numpy",
-    
     # Pin setuptools to a version that still includes pkg_resources
     "setuptools>=45,<78",
+    "kortex-api",
+    "open3d>=0.19.0",
+    "pyrealsense2>=2.58.2.10647",
+    "sam3",
+    "rerun-sdk>=0.23.1",
+    "opencv-python>=4.11.0.86",
+    "einops>=0.8.2",
+    "pycocotools>=2.0.11",
 ]
 
 # Note: pointnet2_ops is a local dependency that must be installed separately.
@@ -143,6 +146,8 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
+kortex-api = { url = "https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/2.6.0/kortex_api-2.6.0.post3-py3-none-any.whl" }
+sam3 = { git = "https://github.com/shi00317/sam3.git", rev = "main" }
 
 # Build dependencies for packages that need special build requirements
 [tool.uv.extra-build-dependencies]

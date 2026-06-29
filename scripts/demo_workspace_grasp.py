@@ -342,7 +342,15 @@ def visualize_results(
     grasps: np.ndarray,
     confidences: np.ndarray,
     gripper_name: str,
+    highlight_index: Optional[int] = None,
 ) -> None:
+    if highlight_index is not None and (
+        highlight_index < 0 or highlight_index >= len(grasps)
+    ):
+        raise ValueError(
+            f"highlight_index {highlight_index} out of range for {len(grasps)} grasp(s)"
+        )
+
     vis = create_visualizer()
     pc_centered = object_cloud.points - object_cloud.points.mean(axis=0)
     grasps_centered = np.array(
@@ -360,13 +368,19 @@ def visualize_results(
     )
     scores = get_color_from_score(confidences, use_255_scale=True)
     for idx, grasp in enumerate(grasps_centered):
+        is_highlight = highlight_index is not None and idx == highlight_index
         visualize_grasp(
             vis,
             f"grasps/{idx:03d}/grasp",
             grasp,
-            color=scores[idx],
+            color=[0, 200, 255] if is_highlight else scores[idx],
             gripper_name=gripper_name,
-            linewidth=0.6,
+            linewidth=2.5 if is_highlight else 0.6,
+        )
+    if highlight_index is not None:
+        print(
+            f"Highlighted grasp index {highlight_index} "
+            f"(conf={confidences[highlight_index]:.4f})"
         )
     input("Press Enter to close visualization...")
 
@@ -420,6 +434,8 @@ def generate_workspace_grasps(
     voxel_size: float = 0.002,
     output_dir: Optional[str | Path] = None,
     visualize: bool = True,
+    highlight_index: Optional[int] = None,
+    highlight_set: int = 0,
 ) -> list[tuple[Path, Path]]:
     """Generate and save grasps for segmented clouds in a workspace capture.
 
@@ -514,7 +530,13 @@ def generate_workspace_grasps(
             )
         )
         if visualize:
-            visualize_results(object_cloud, grasps, confidences, gripper_name)
+            visualize_results(
+                object_cloud,
+                grasps,
+                confidences,
+                gripper_name,
+                highlight_index=highlight_index if highlight_set == 0 else None,
+            )
         return saved_outputs
 
     for object_cloud in segmented_objects:
@@ -556,7 +578,16 @@ def generate_workspace_grasps(
             )
         )
         if visualize:
-            visualize_results(object_cloud, grasps, confidences, gripper_name)
+            output_idx = len(saved_outputs) - 1
+            visualize_results(
+                object_cloud,
+                grasps,
+                confidences,
+                gripper_name,
+                highlight_index=(
+                    highlight_index if output_idx == highlight_set else None
+                ),
+            )
 
     return saved_outputs
 

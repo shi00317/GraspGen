@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
-"""Capture a segmented workspace and generate object grasp poses.
+"""Capture a segmented workspace, generate grasp poses, and optionally execute one.
 
-This combines ``kinova_gen3.camera.workspace`` and
-``scripts/demo_workspace_grasp.py`` into one capture-to-grasp pipeline.
+This combines ``kinova_gen3.camera.workspace``,
+``scripts/demo_workspace_grasp.py``, and ``kinova_gen3.robot.execute`` into
+one capture-to-grasp pipeline.
 
 Example:
     python scripts/capture_and_grasp.py \
         --calibration_file data/calibration/calibration.json \
         --gripper_config /models/checkpoints/graspgen_robotiq_2f_140.yml \
-        --object bottle --merge_cameras --return_topk
-"""
+        --object bottle --merge_cameras --return_topk --execute
 
+Grasps are generated with the Robotiq 2F-140 model convention and converted
+to 2F-85 poses before execution (see ``--no_gripper_conversion`` to skip).
+"""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 from typing import Optional
+
+if sys.version_info.major == 3 and sys.version_info.minor >= 10:   
+    import collections
+    setattr(collections, "MutableMapping", collections.abc.MutableMapping)
+    setattr(collections,"MutableSequence", collections.abc.MutableSequence)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -31,6 +40,18 @@ from demo_workspace_grasp import (
     validate_gripper_config,
 )
 from kinova_gen3.camera.workspace import capture_workspace
+from kinova_gen3.robot.execute import (
+    convert_robotiq_2f140_grasps_to_2f85,
+    execute_world_grasp,
+    load_grasps_from_json,
+    load_robot_base_transform,
+)
+from kinova_gen3.utilities.convert_robotiq_2f140_to_2f85 import (
+    ROBOTIQ_2F140_DEPTH_M,
+    ROBOTIQ_2F85_DEPTH_M,
+)
+from kinova_gen3.robot.utilities import DeviceConnection
+from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +88,103 @@ def parse_args() -> argparse.Namespace:
     grasp.add_argument("--grasp_voxel_size", type=float, default=0.002)
     grasp.add_argument("--grasp_output_dir", default=None)
     grasp.add_argument("--no-visualization", action="store_true")
+
+    robot = parser.add_argument_group("robot execution")
+    robot.add_argument(
+        "--execute",
+        action="store_true",
+        help="Move the Kinova arm to one generated grasp and close the gripper",
+    )
+    robot.add_argument(
+        "--grasp_index",
+        type=int,
+        default=0,
+        help="Index into the saved grasp list (0 = highest confidence when using --return_topk)",
+    )
+    robot.add_argument(
+        "--grasp_set",
+        type=int,
+        default=0,
+        help="Which saved grasp result set to use when multiple cameras are processed",
+    )
+    robot.add_argument(
+        "--robot_T_w_r",
+        default=None,
+        help="Optional JSON file with a 4x4 T_w_r transform from robot base to world frame",
+    )
+    robot.add_argument(
+        "--pre_grasp_offset",
+        type=float,
+        default=0.10,
+        help="Pre-grasp retreat along approach axis in meters",
+    )
+    robot.add_argument("--speed", type=float, default=0.15, help="Cartesian motion speed")
+    robot.add_argument(
+        "--dry_run",
+        action="store_true",
+        help="Print the selected grasp in robot base frame without moving",
+    )
+    robot.add_argument(
+        "--no_gripper_conversion",
+        action="store_true",
+        help=(
+            "Skip converting 2F-140 model grasps to Robotiq 2F-85 poses "
+            "(conversion is on by default for --execute)"
+        ),
+    )
+    parser.add_argument("--ip", type=str, default="192.168.1.10", help="Robot IP address")
+    parser.add_argument("-u", "--username", type=str, default="admin", help="Robot login username")
+    parser.add_argument("-p", "--password", type=str, default="admin", help="Robot login password")
     return parser.parse_args()
+
+
+def execute_selected_grasp(
+    args: argparse.Namespace,
+    outputs: list[tuple[Path, Path]],
+) -> bool:
+    """Execute one grasp from the pipeline output on the Kinova robot."""
+    if not outputs:
+        print("No grasp outputs available to execute.")
+        return False
+    if args.grasp_set < 0 or args.grasp_set >= len(outputs):
+        raise ValueError(
+            f"--grasp_set {args.grasp_set} out of range for {len(outputs)} result set(s)"
+        )
+
+    _, json_path = outputs[args.grasp_set]
+    grasps, confidences = load_grasps_from_json(str(json_path))
+    if not args.no_gripper_conversion:
+        shift_m = ROBOTIQ_2F140_DEPTH_M - ROBOTIQ_2F85_DEPTH_M
+        grasps = convert_robotiq_2f140_grasps_to_2f85(grasps)
+        print(
+            f"Converted grasps from Robotiq 2F-140 model to 2F-85 "
+            f"(local +Z shift {shift_m:.4f} m)"
+        )
+    if len(grasps) == 0:
+        print(f"No grasps found in {json_path}")
+        return False
+    if args.grasp_index < 0 or args.grasp_index >= len(grasps):
+        raise ValueError(
+            f"--grasp_index {args.grasp_index} out of range for {len(grasps)} grasp(s)"
+        )
+
+    T_w_g = grasps[args.grasp_index]
+    confidence = float(confidences[args.grasp_index])
+    T_w_r = load_robot_base_transform(args.robot_T_w_r)
+
+    print(f"\n=== Stage 3/3: Execute grasp {args.grasp_index} (conf={confidence:.4f}) ===")
+    print(f"Grasp file: {json_path}")
+
+    with DeviceConnection.createTcpConnection(args) as router:
+        base = BaseClient(router)
+        return execute_world_grasp(
+            base,
+            T_w_g,
+            T_w_r,
+            pre_grasp_offset_m=args.pre_grasp_offset,
+            speed=args.speed,
+            dry_run=args.dry_run,
+        )
 
 
 def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
@@ -90,7 +207,9 @@ def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
     # Validate all model files before initializing or warming up the cameras.
     validate_gripper_config(gripper_config)
 
-    print("\n=== Stage 1/2: Capture and segment workspace ===")
+    total_stages = 3 if args.execute else 2
+
+    print(f"\n=== Stage 1/{total_stages}: Capture and segment workspace ===")
     workspace_dir = capture_workspace(
         calibration_file=str(calibration_file),
         output_dir=str(output_dir),
@@ -109,7 +228,7 @@ def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
     )
 
     print(f"\nCaptured workspace: {workspace_dir}")
-    print("\n=== Stage 2/2: Generate grasp poses ===")
+    print(f"\n=== Stage 2/{total_stages}: Generate grasp poses ===")
     outputs = generate_workspace_grasps(
         workspace_dir=workspace_dir,
         gripper_config=gripper_config,
@@ -125,12 +244,24 @@ def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
         voxel_size=args.grasp_voxel_size,
         output_dir=grasp_output_dir,
         visualize=not args.no_visualization,
+        highlight_index=args.grasp_index,
+        highlight_set=args.grasp_set,
     )
 
     if outputs:
-        print(f"\nPipeline complete: saved {len(outputs)} grasp result set(s).")
+        print(f"\nSaved {len(outputs)} grasp result set(s).")
     else:
-        print("\nPipeline complete, but no valid grasps were generated.")
+        print("\nNo valid grasps were generated.")
+        return outputs
+
+    if args.execute:
+        success = execute_selected_grasp(args, outputs)
+        if success:
+            print("\nPipeline complete: grasp executed successfully.")
+        else:
+            print("\nPipeline complete, but grasp execution failed.")
+    else:
+        print("\nPipeline complete.")
     return outputs
 
 

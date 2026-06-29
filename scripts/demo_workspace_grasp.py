@@ -5,8 +5,8 @@ Reads segmented object points saved by capture_workspace.py (object_points_*.csv
 under segments/<camera_serial>/<prompt>/) and runs GraspGen inference.
 
 Example:
-    python my_data/demo_workspace_grasp.py \\
-        --workspace_dir my_data/workspace_20260623_172424 \\
+    python scripts/demo_workspace_grasp.py \\
+        --workspace_dir data/workspace_20260623_172424 \\
         --gripper_config /path/to/GraspGenModels/checkpoints/graspgen_robotiq_2f_140.yml \\
         --object bottle \\
         --merge_cameras \\

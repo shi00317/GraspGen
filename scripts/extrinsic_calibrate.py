@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""CLI entry point for multi-camera extrinsic calibration."""
+"""CLI entry point for multi-camera extrinsic calibration.
 
+Example:
+    python scripts/extrinsic_calibrate.py output_dir=data num_samples=10
+"""
+
+import sys
 from pathlib import Path
 from typing import Tuple
 
 import cv2
 from hydra_zen import make_config, store, zen
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from kinova_gen3.camera.pipeline import run_calibration
 

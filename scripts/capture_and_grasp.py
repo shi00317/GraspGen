@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Capture a segmented workspace and generate object grasp poses.
 
-This combines ``camera/capture_workspace.py`` and
-``kinova_gen3/demo_workspace_grasp.py`` into one capture-to-grasp pipeline.
+This combines ``kinova_gen3.camera.workspace`` and
+``scripts/demo_workspace_grasp.py`` into one capture-to-grasp pipeline.
 
 Example:
-    python kinova_gen3/capture_and_grasp.py \
-        --calibration_file camera/data/calibration/calibration.json \
+    python scripts/capture_and_grasp.py \
+        --calibration_file data/calibration/calibration.json \
         --gripper_config /models/checkpoints/graspgen_robotiq_2f_140.yml \
         --object bottle --merge_cameras --return_topk
 """
@@ -18,28 +18,19 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# When this file is run directly, Python adds ``kinova_gen3/`` rather than the
-# repository root to sys.path.  Add the root so sibling packages such as
-# ``camera`` and ``grasp_gen`` can be imported.
-if __package__ in (None, ""):
-    project_root = Path(__file__).resolve().parents[1]
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+for path in (_REPO_ROOT, _SCRIPTS_DIR):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
+from demo_workspace_grasp import (
+    absolute_path_without_resolving,
+    generate_workspace_grasps,
+    validate_gripper_config,
+)
 from kinova_gen3.camera.workspace import capture_workspace
-
-if __package__:
-    from .demo_workspace_grasp import (
-        absolute_path_without_resolving,
-        generate_workspace_grasps,
-        validate_gripper_config,
-    )
-else:
-    from scripts.demo_workspace_grasp import (
-        absolute_path_without_resolving,
-        generate_workspace_grasps,
-        validate_gripper_config,
-    )
 
 
 def parse_args() -> argparse.Namespace:

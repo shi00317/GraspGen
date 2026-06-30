@@ -18,9 +18,9 @@ from .realsense import RealsenseCamera
 
 ROBOT_T_W_R = np.array(
     [
-        [-1, 0, 0, 0.578],
-        [0, 1, 0, 0],
-        [0, 0, -1, -0.15],
+        [0, 1, 0, 0.0],
+        [1, 0, 0, 0.35],
+        [0, 0, -1, 0.025],
         [0, 0, 0, 1],
     ]
 )
@@ -110,9 +110,8 @@ def log_static_calibration_scene(
             static=True,
         )
 
-    robot_T_r_w = np.linalg.inv(robot_T_w_r)
-    robot_origin = robot_T_r_w[:3, 3]
-    robot_rot = robot_T_r_w[:3, :3]
+    robot_origin = robot_T_w_r[:3, 3]
+    robot_rot = robot_T_w_r[:3, :3]
     robot_axes = _axis_strips(robot_origin, robot_rot, 0.1)
     for axis_name, color in zip(
         ("x", "y", "z"),

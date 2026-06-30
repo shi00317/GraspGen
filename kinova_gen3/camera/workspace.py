@@ -22,6 +22,24 @@ def load_calibration(calibration_file: str) -> Dict[str, np.ndarray]:
     return {serial: np.array(transform) for serial, transform in data.items()}
 
 
+def load_transform_4x4(transform_file: str, key: str = "T_w_r") -> np.ndarray:
+    """Load a homogeneous 4x4 transform from JSON."""
+    with open(transform_file) as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        if key in data:
+            data = data[key]
+        elif "transform" in data:
+            data = data["transform"]
+
+    transform = np.array(data, dtype=np.float64)
+    if transform.shape != (4, 4):
+        raise ValueError(
+            f"Expected {transform_file} to contain a 4x4 transform, got {transform.shape}"
+        )
+    return transform
+
+
 def configure_hardware_sync(
     serials: list[str],
     master_serial: Optional[str] = None,
@@ -204,6 +222,7 @@ def capture_workspace(
     sam3_device: Optional[str] = None,
     sam3_score_threshold: float = 0.0,
     sam3_top_k: int = 0,
+    robot_T_w_r_file: Optional[str] = None,
 ) -> Path:
     """
     Capture synchronized RGB images and a merged workspace point cloud.
@@ -226,6 +245,9 @@ def capture_workspace(
         sam3_device: SAM3 inference device ("cuda" or "cpu")
         sam3_score_threshold: Drop SAM3 instances below this score
         sam3_top_k: Keep only the top K SAM3 masks per prompt (0 = all)
+        robot_T_w_r_file: Optional JSON file with ``T_w_r``. ``T_w_r`` maps
+            robot-base coordinates into the ChArUco/world frame, so generated
+            world-frame grasps can be converted with ``inv(T_w_r) @ T_w_g``.
 
     Returns:
         Path to the output folder containing RGB images, workspace.pcd, and
@@ -238,6 +260,26 @@ def capture_workspace(
     T_w_c_dict = load_calibration(str(calibration_path))
     serials = list(T_w_c_dict.keys())
     print(f"Loaded calibration for {len(serials)} camera(s): {serials}")
+
+    robot_transform_metadata = None
+    if robot_T_w_r_file is not None:
+        robot_transform_path = Path(robot_T_w_r_file)
+        if not robot_transform_path.is_file():
+            raise FileNotFoundError(
+                f"Robot base transform file not found: {robot_transform_path}"
+            )
+        T_w_r = load_transform_4x4(str(robot_transform_path), key="T_w_r")
+        T_r_w = np.linalg.inv(T_w_r)
+        robot_transform_metadata = {
+            "source_file": str(robot_transform_path.resolve()),
+            "frame_convention": (
+                "T_w_r maps robot-base coordinates into the ChArUco/world frame; "
+                "convert generated world-frame grasps with T_r_g = inv(T_w_r) @ T_w_g."
+            ),
+            "T_w_r": T_w_r.tolist(),
+            "T_r_w": T_r_w.tolist(),
+        }
+        print(f"Loaded robot base transform: {robot_transform_path}")
 
     rs_context = None
     if hardware_sync and len(serials) > 1:
@@ -305,6 +347,8 @@ def capture_workspace(
             "pcd_voxel_size": pcd_voxel_size,
             "max_range_m": max_range_m,
         }
+        if robot_transform_metadata is not None:
+            metadata["robot_base_transform"] = robot_transform_metadata
 
         return save_workspace_capture(
             output_folder,

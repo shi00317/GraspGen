@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
@@ -25,11 +26,19 @@ from typing import Iterable, Iterator, Optional
 import numpy as np
 import trimesh.transformations as tra
 
+# Ensure the repo root is importable so ``kinova_gen3`` resolves when this
+# script is run directly (e.g. ``python scripts/demo_workspace_grasp.py``).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+DEFAULT_ROBOT_T_W_R_FILE = _REPO_ROOT / "config" / "robot_T_w_r.json"
+
 from grasp_gen.dataset.eval_utils import save_to_isaac_grasp_format
 from grasp_gen.grasp_server import GraspGenSampler, load_grasp_cfg
 from grasp_gen.utils.viser_utils import (
     create_visualizer,
     get_color_from_score,
+    make_frame,
     visualize_grasp,
     visualize_pointcloud,
 )
@@ -130,6 +139,31 @@ def parse_args() -> argparse.Namespace:
         "--no-visualization",
         action="store_true",
         help="Disable viser visualization",
+    )
+    parser.add_argument(
+        "--robot_T_w_r",
+        type=str,
+        default=str(DEFAULT_ROBOT_T_W_R_FILE),
+        help=(
+            "JSON file with the 4x4 T_w_r transform (robot base -> world frame). "
+            "Used to draw the world and robot-base frames when the capture "
+            "metadata does not already include one."
+        ),
+    )
+    parser.add_argument(
+        "--query_gripper",
+        action="store_true",
+        help=(
+            "Connect to the live Kinova robot and draw the current gripper "
+            "(end-effector) frame in the world frame"
+        ),
+    )
+    parser.add_argument("--ip", type=str, default="192.168.1.10", help="Robot IP address")
+    parser.add_argument(
+        "-u", "--username", type=str, default="admin", help="Robot login username"
+    )
+    parser.add_argument(
+        "-p", "--password", type=str, default="admin", help="Robot login password"
     )
     return parser.parse_args()
 
@@ -337,12 +371,61 @@ def run_inference_for_object(
     return grasps_np, conf_np
 
 
+def load_world_robot_transform(
+    metadata: dict,
+    fallback_file: Optional[str | Path] = None,
+) -> Optional[np.ndarray]:
+    """Resolve T_w_r (robot base -> world frame) for the capture.
+
+    Prefers the transform embedded in the capture metadata (saved by
+    ``capture_workspace``) and falls back to a standalone JSON file.
+    """
+    robot_meta = metadata.get("robot_base_transform")
+    if isinstance(robot_meta, dict) and "T_w_r" in robot_meta:
+        return np.asarray(robot_meta["T_w_r"], dtype=np.float64)
+
+    if fallback_file is not None:
+        fallback_path = Path(fallback_file)
+        if fallback_path.is_file():
+            with fallback_path.open() as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data = data.get("T_w_r", data.get("transform", data))
+            return np.asarray(data, dtype=np.float64)
+
+    return None
+
+
+def query_world_gripper_pose(
+    T_w_r: np.ndarray,
+    ip: str,
+    username: str,
+    password: str,
+) -> np.ndarray:
+    """Query the live robot end-effector pose and express it in the world frame.
+
+    Returns ``T_w_e = T_w_r @ T_r_e`` where ``T_r_e`` is the current gripper
+    pose in the robot base frame.
+    """
+    from kinova_gen3.robot.execute import get_current_pose
+    from kinova_gen3.robot.utilities import DeviceConnection
+    from kortex_api.autogen.client_stubs.BaseCyclicClientRpc import BaseCyclicClient
+
+    conn_args = argparse.Namespace(ip=ip, username=username, password=password)
+    with DeviceConnection.createUdpConnection(conn_args) as router:
+        base_cyclic = BaseCyclicClient(router)
+        T_r_e = get_current_pose(base_cyclic)
+    return np.asarray(T_w_r, dtype=np.float64) @ np.asarray(T_r_e, dtype=np.float64)
+
+
 def visualize_results(
     object_cloud: ObjectPointCloud,
     grasps: np.ndarray,
     confidences: np.ndarray,
     gripper_name: str,
     highlight_index: Optional[int] = None,
+    T_w_r: Optional[np.ndarray] = None,
+    T_w_e: Optional[np.ndarray] = None,
 ) -> None:
     if highlight_index is not None and (
         highlight_index < 0 or highlight_index >= len(grasps)
@@ -352,13 +435,10 @@ def visualize_results(
         )
 
     vis = create_visualizer()
-    pc_centered = object_cloud.points - object_cloud.points.mean(axis=0)
-    grasps_centered = np.array(
-        [
-            tra.translation_matrix(-object_cloud.points.mean(axis=0)) @ grasp
-            for grasp in grasps
-        ]
-    )
+    center = object_cloud.points.mean(axis=0)
+    T_center = tra.translation_matrix(-center)
+    pc_centered = object_cloud.points - center
+    grasps_centered = np.array([T_center @ grasp for grasp in grasps])
     visualize_pointcloud(
         vis,
         "object_pc",
@@ -366,6 +446,24 @@ def visualize_results(
         object_cloud.colors,
         size=0.0025,
     )
+
+    # Draw reference frames in the same centered coordinates as the point
+    # cloud. The world frame is the ChArUco/dual-camera-extrinsic origin
+    # (identity), the robot base comes from T_w_r, and the gripper frame is
+    # T_w_e = T_w_r @ T_r_e from the live robot.
+    make_frame(vis, "frames/world", h=0.20, radius=0.006, T=T_center)
+    print("World frame (camera extrinsics): RGB triad at 'frames/world'")
+    if T_w_r is not None:
+        make_frame(vis, "frames/robot_base", h=0.15, radius=0.006, T=T_center @ T_w_r)
+        print("Robot base frame: RGB triad at 'frames/robot_base'")
+    else:
+        print(
+            "Robot base frame skipped: no T_w_r found in capture metadata or "
+            "--robot_T_w_r file."
+        )
+    if T_w_e is not None:
+        make_frame(vis, "frames/robot_gripper", h=0.12, radius=0.006, T=T_center @ T_w_e)
+        print("Robot gripper frame: RGB triad at 'frames/robot_gripper'")
     scores = get_color_from_score(confidences, use_255_scale=True)
     for idx, grasp in enumerate(grasps_centered):
         is_highlight = highlight_index is not None and idx == highlight_index
@@ -436,6 +534,11 @@ def generate_workspace_grasps(
     visualize: bool = True,
     highlight_index: Optional[int] = None,
     highlight_set: int = 0,
+    robot_T_w_r_file: Optional[str | Path] = None,
+    query_gripper: bool = False,
+    robot_ip: str = "192.168.1.10",
+    robot_username: str = "admin",
+    robot_password: str = "admin",
 ) -> list[tuple[Path, Path]]:
     """Generate and save grasps for segmented clouds in a workspace capture.
 
@@ -487,6 +590,25 @@ def generate_workspace_grasps(
     gripper_name = grasp_cfg.data.gripper_name
     saved_outputs: list[tuple[Path, Path]] = []
 
+    # Resolve reference frames for visualization.
+    T_w_r: Optional[np.ndarray] = None
+    T_w_e: Optional[np.ndarray] = None
+    if visualize:
+        T_w_r = load_world_robot_transform(metadata, robot_T_w_r_file)
+        if query_gripper:
+            if T_w_r is None:
+                print(
+                    "Cannot draw gripper frame: no T_w_r available "
+                    "(provide --robot_T_w_r or capture with a robot transform)."
+                )
+            else:
+                try:
+                    T_w_e = query_world_gripper_pose(
+                        T_w_r, robot_ip, robot_username, robot_password
+                    )
+                except Exception as exc:  # noqa: BLE001 - visualization is best-effort
+                    print(f"Warning: could not query live gripper pose: {exc}")
+
     if merge_cameras:
         prompts = sorted({obj.prompt for obj in segmented_objects})
         if len(prompts) != 1:
@@ -536,6 +658,8 @@ def generate_workspace_grasps(
                 confidences,
                 gripper_name,
                 highlight_index=highlight_index if highlight_set == 0 else None,
+                T_w_r=T_w_r,
+                T_w_e=T_w_e,
             )
         return saved_outputs
 
@@ -587,6 +711,8 @@ def generate_workspace_grasps(
                 highlight_index=(
                     highlight_index if output_idx == highlight_set else None
                 ),
+                T_w_r=T_w_r,
+                T_w_e=T_w_e,
             )
 
     return saved_outputs
@@ -609,6 +735,11 @@ def main() -> None:
         voxel_size=args.voxel_size,
         output_dir=args.output_dir,
         visualize=not args.no_visualization,
+        robot_T_w_r_file=args.robot_T_w_r,
+        query_gripper=args.query_gripper,
+        robot_ip=args.ip,
+        robot_username=args.username,
+        robot_password=args.password,
     )
 
 

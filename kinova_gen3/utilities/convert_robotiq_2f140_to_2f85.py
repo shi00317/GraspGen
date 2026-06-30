@@ -23,10 +23,12 @@ from typing import Any
 import numpy as np
 
 
-ROBOTIQ_2F140_DEPTH_M = 0.1950
-# From the 2F-85 and 2F-140 technical drawings in my_data/robotiq_config:
-# open-height difference = 209.8 mm - 149.3 mm = 60.5 mm.
-ROBOTIQ_2F85_DEPTH_M = ROBOTIQ_2F140_DEPTH_M - 0.0605
+# GraspGen-convention base_frame -> fingerpad/contact depths, taken from the
+# gripper configs (config/grippers/robotiq_2f_140.yaml and robotiq_2f_85.yaml).
+# These are the distances that define where each gripper's TCP sits along +Z,
+# NOT the datasheet outer "open height" of the gripper body.
+ROBOTIQ_2F140_DEPTH_M = 0.1950  # robotiq_2f_140.yaml: depth / contact z
+ROBOTIQ_2F85_DEPTH_M = 0.052324 #0.130324  # robotiq_2f_85.yaml: contact location z
 ROBOTIQ_2F85_MAX_APERTURE_M = 0.085
 
 
@@ -55,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         "--target-depth",
         type=float,
         default=ROBOTIQ_2F85_DEPTH_M,
-        help="2F-85 depth/contact offset in meters (default: 0.1345)",
+        help="2F-85 depth/contact offset in meters (default: 0.1303)",
     )
     parser.add_argument(
         "--max-aperture",

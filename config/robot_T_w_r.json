@@ -1,0 +1,11 @@
+{
+  "frame_convention": "T_w_r maps robot-base coordinates into the ChArUco/world frame. Use T_r_g = inv(T_w_r) @ T_w_g to convert generated world-frame grasp poses into robot-base poses.",
+  "units": "meters",
+  "measurement_note": "From the annotated desk layout: world origin is about 0.77 m in front of the robot base and about 0.08 m to the robot's left. Re-measure and update this file if the board or robot moves.",
+  "T_w_r": [
+    [0.0, 1.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0, -0.35],
+    [0.0, 0.0, -1.0, -0.025],
+    [0.0, 0.0, 0.0, 1.0]
+  ]
+}

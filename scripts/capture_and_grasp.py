@@ -29,6 +29,7 @@ if sys.version_info.major == 3 and sys.version_info.minor >= 10:
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+DEFAULT_ROBOT_T_W_R_FILE = _REPO_ROOT / "config" / "robot_T_w_r.json"
 for path in (_REPO_ROOT, _SCRIPTS_DIR):
     path_str = str(path)
     if path_str not in sys.path:
@@ -88,6 +89,14 @@ def parse_args() -> argparse.Namespace:
     grasp.add_argument("--grasp_voxel_size", type=float, default=0.002)
     grasp.add_argument("--grasp_output_dir", default=None)
     grasp.add_argument("--no-visualization", action="store_true")
+    grasp.add_argument(
+        "--query_gripper",
+        action="store_true",
+        help=(
+            "Draw the live robot gripper (end-effector) frame in the grasp "
+            "visualization, in addition to the world and robot-base frames"
+        ),
+    )
 
     robot = parser.add_argument_group("robot execution")
     robot.add_argument(
@@ -109,8 +118,8 @@ def parse_args() -> argparse.Namespace:
     )
     robot.add_argument(
         "--robot_T_w_r",
-        default=None,
-        help="Optional JSON file with a 4x4 T_w_r transform from robot base to world frame",
+        default=str(DEFAULT_ROBOT_T_W_R_FILE),
+        help="JSON file with a 4x4 T_w_r transform from robot base to world frame",
     )
     robot.add_argument(
         "--pre_grasp_offset",
@@ -225,6 +234,7 @@ def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
         sam3_device=args.sam3_device,
         sam3_score_threshold=args.sam3_score_threshold,
         sam3_top_k=args.sam3_top_k,
+        robot_T_w_r_file=args.robot_T_w_r,
     )
 
     print(f"\nCaptured workspace: {workspace_dir}")
@@ -246,6 +256,11 @@ def run_pipeline(args: argparse.Namespace) -> list[tuple[Path, Path]]:
         visualize=not args.no_visualization,
         highlight_index=args.grasp_index,
         highlight_set=args.grasp_set,
+        robot_T_w_r_file=args.robot_T_w_r,
+        query_gripper=args.query_gripper,
+        robot_ip=args.ip,
+        robot_username=args.username,
+        robot_password=args.password,
     )
 
     if outputs:

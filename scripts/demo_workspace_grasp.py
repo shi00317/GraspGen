@@ -16,12 +16,10 @@ Example:
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Optional
 
 import numpy as np
 import trimesh.transformations as tra
@@ -33,6 +31,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 DEFAULT_ROBOT_T_W_R_FILE = _REPO_ROOT / "config" / "robot_T_w_r.json"
 
+from kinova_gen3.camera.object_points import (
+    ObjectPointCloud,
+    iter_segmented_objects,
+    load_capture_metadata,
+    merge_object_point_clouds,
+    voxel_downsample,
+)
+
 from grasp_gen.dataset.eval_utils import save_to_isaac_grasp_format
 from grasp_gen.grasp_server import GraspGenSampler, load_grasp_cfg
 from grasp_gen.utils.viser_utils import (
@@ -42,18 +48,6 @@ from grasp_gen.utils.viser_utils import (
     visualize_grasp,
     visualize_pointcloud,
 )
-
-
-@dataclass(frozen=True)
-class ObjectPointCloud:
-    """Segmented object point cloud in the workspace world frame."""
-
-    camera_serial: str
-    prompt: str
-    instance_index: int
-    points: np.ndarray
-    colors: np.ndarray
-    source_csv: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,8 +148,8 @@ def parse_args() -> argparse.Namespace:
         "--query_gripper",
         action="store_true",
         help=(
-            "Connect to the live Kinova robot and draw the current gripper "
-            "(end-effector) frame in the world frame"
+            "Connect to the live Kinova robot and draw the current gripper frame "
+            "plus left/right fingertip locations in the world frame"
         ),
     )
     parser.add_argument("--ip", type=str, default="192.168.1.10", help="Robot IP address")
@@ -166,128 +160,6 @@ def parse_args() -> argparse.Namespace:
         "-p", "--password", type=str, default="admin", help="Robot login password"
     )
     return parser.parse_args()
-
-
-def load_capture_metadata(workspace_dir: Path) -> dict:
-    capture_path = workspace_dir / "capture.json"
-    if not capture_path.is_file():
-        raise FileNotFoundError(f"Missing capture metadata: {capture_path}")
-    with capture_path.open() as f:
-        return json.load(f)
-
-
-def resolve_object_points_csv(
-    workspace_dir: Path,
-    camera_serial: str,
-    prompt: str,
-    instance_index: int,
-    recorded_path: str,
-) -> Path:
-    """Resolve object_points CSV path from capture metadata."""
-    candidates = [
-        Path(recorded_path),
-        workspace_dir
-        / "segments"
-        / camera_serial
-        / prompt
-        / f"object_points_{instance_index:02d}.csv",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    raise FileNotFoundError(
-        "Could not find object points CSV for "
-        f"camera={camera_serial}, object={prompt}, instance={instance_index}. "
-        f"Tried: {', '.join(str(path) for path in candidates)}"
-    )
-
-
-def load_object_points_csv(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Load xyz and rgb from an object_points_*.csv file."""
-    points: list[list[float]] = []
-    colors: list[list[int]] = []
-    with csv_path.open(newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            points.append([float(row["x"]), float(row["y"]), float(row["z"])])
-            colors.append([int(row["r"]), int(row["g"]), int(row["b"])])
-    if not points:
-        raise ValueError(f"No points found in {csv_path}")
-    return np.asarray(points, dtype=np.float64), np.asarray(colors, dtype=np.uint8)
-
-
-def iter_segmented_objects(
-    workspace_dir: Path,
-    metadata: dict,
-    object_name: Optional[str],
-    camera_serial: Optional[str],
-    instance_index: int,
-) -> Iterator[ObjectPointCloud]:
-    segmentation = metadata.get("segmentation")
-    if not segmentation or not segmentation.get("enabled"):
-        raise ValueError(f"No segmentation data found in {workspace_dir / 'capture.json'}")
-
-    cameras = segmentation.get("cameras", {})
-    for serial, objects in cameras.items():
-        if camera_serial is not None and serial != camera_serial:
-            continue
-        for prompt, object_meta in objects.items():
-            if object_name is not None and prompt != object_name:
-                continue
-
-            object_points_meta = object_meta.get("object_points", [])
-            if instance_index < 1 or instance_index > len(object_points_meta):
-                raise IndexError(
-                    f"Instance {instance_index} not found for camera={serial}, object={prompt}. "
-                    f"Available instances: {len(object_points_meta)}"
-                )
-            entry = object_points_meta[instance_index - 1]
-            csv_path = resolve_object_points_csv(
-                workspace_dir,
-                serial,
-                prompt,
-                instance_index,
-                entry["path"],
-            )
-            points, colors = load_object_points_csv(csv_path)
-            yield ObjectPointCloud(
-                camera_serial=serial,
-                prompt=prompt,
-                instance_index=instance_index,
-                points=points,
-                colors=colors,
-                source_csv=csv_path,
-            )
-
-
-def voxel_downsample(
-    points: np.ndarray, colors: np.ndarray, voxel_size: float
-) -> tuple[np.ndarray, np.ndarray]:
-    if voxel_size <= 0:
-        return points, colors
-    voxel_indices = np.floor(points / voxel_size).astype(np.int64)
-    _, unique_idx = np.unique(voxel_indices, axis=0, return_index=True)
-    return points[unique_idx], colors[unique_idx]
-
-
-def merge_object_point_clouds(objects: Iterable[ObjectPointCloud]) -> ObjectPointCloud:
-    clouds = list(objects)
-    if not clouds:
-        raise ValueError("No segmented object point clouds matched the selection")
-    if len(clouds) == 1:
-        return clouds[0]
-
-    points = np.concatenate([cloud.points for cloud in clouds], axis=0)
-    colors = np.concatenate([cloud.colors for cloud in clouds], axis=0)
-    serials = "+".join(cloud.camera_serial for cloud in clouds)
-    return ObjectPointCloud(
-        camera_serial=serials,
-        prompt=clouds[0].prompt,
-        instance_index=clouds[0].instance_index,
-        points=points,
-        colors=colors,
-        source_csv=clouds[0].source_csv,
-    )
 
 
 def output_stem(object_cloud: ObjectPointCloud, merged: bool) -> str:
@@ -418,6 +290,26 @@ def query_world_gripper_pose(
     return np.asarray(T_w_r, dtype=np.float64) @ np.asarray(T_r_e, dtype=np.float64)
 
 
+def query_world_fingertip_positions(
+    T_w_r: np.ndarray,
+    ip: str,
+    username: str,
+    password: str,
+    *,
+    gripper_name: str = "robotiq_2f85",
+):
+    """Query live left/right fingertip positions in the calibration world frame."""
+    from kinova_gen3.robot.execute import query_world_fingertip_positions as _query_tips
+
+    return _query_tips(
+        T_w_r,
+        ip=ip,
+        username=username,
+        password=password,
+        gripper_name=gripper_name,
+    )
+
+
 def visualize_results(
     object_cloud: ObjectPointCloud,
     grasps: np.ndarray,
@@ -426,6 +318,7 @@ def visualize_results(
     highlight_index: Optional[int] = None,
     T_w_r: Optional[np.ndarray] = None,
     T_w_e: Optional[np.ndarray] = None,
+    fingertip_positions: Optional[object] = None,
 ) -> None:
     if highlight_index is not None and (
         highlight_index < 0 or highlight_index >= len(grasps)
@@ -464,6 +357,22 @@ def visualize_results(
     if T_w_e is not None:
         make_frame(vis, "frames/robot_gripper", h=0.12, radius=0.006, T=T_center @ T_w_e)
         print("Robot gripper frame: RGB triad at 'frames/robot_gripper'")
+    if fingertip_positions is not None:
+        tip_points = np.vstack(
+            [fingertip_positions.left_world, fingertip_positions.right_world]
+        )
+        tip_colors = np.array([[255, 80, 80], [80, 80, 255]], dtype=np.uint8)
+        visualize_pointcloud(
+            vis,
+            "frames/robot_fingertips",
+            tip_points - center,
+            color=tip_colors,
+            size=0.012,
+        )
+        print(
+            "Robot fingertips (world): left=red, right=blue at "
+            "'frames/robot_fingertips'"
+        )
     scores = get_color_from_score(confidences, use_255_scale=True)
     for idx, grasp in enumerate(grasps_centered):
         is_highlight = highlight_index is not None and idx == highlight_index
@@ -593,6 +502,7 @@ def generate_workspace_grasps(
     # Resolve reference frames for visualization.
     T_w_r: Optional[np.ndarray] = None
     T_w_e: Optional[np.ndarray] = None
+    fingertip_positions = None
     if visualize:
         T_w_r = load_world_robot_transform(metadata, robot_T_w_r_file)
         if query_gripper:
@@ -603,9 +513,14 @@ def generate_workspace_grasps(
                 )
             else:
                 try:
-                    T_w_e = query_world_gripper_pose(
-                        T_w_r, robot_ip, robot_username, robot_password
+                    fingertip_positions = query_world_fingertip_positions(
+                        T_w_r,
+                        robot_ip,
+                        robot_username,
+                        robot_password,
+                        gripper_name="robotiq_2f85",
                     )
+                    T_w_e = fingertip_positions.T_w_e
                 except Exception as exc:  # noqa: BLE001 - visualization is best-effort
                     print(f"Warning: could not query live gripper pose: {exc}")
 
@@ -660,6 +575,7 @@ def generate_workspace_grasps(
                 highlight_index=highlight_index if highlight_set == 0 else None,
                 T_w_r=T_w_r,
                 T_w_e=T_w_e,
+                fingertip_positions=fingertip_positions,
             )
         return saved_outputs
 
@@ -713,6 +629,7 @@ def generate_workspace_grasps(
                 ),
                 T_w_r=T_w_r,
                 T_w_e=T_w_e,
+                fingertip_positions=fingertip_positions,
             )
 
     return saved_outputs

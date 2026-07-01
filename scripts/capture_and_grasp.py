@@ -93,8 +93,8 @@ def parse_args() -> argparse.Namespace:
         "--query_gripper",
         action="store_true",
         help=(
-            "Draw the live robot gripper (end-effector) frame in the grasp "
-            "visualization, in addition to the world and robot-base frames"
+            "Draw the live robot gripper frame and left/right fingertip locations "
+            "in the grasp visualization (requires robot connection and T_w_r)"
         ),
     )
 

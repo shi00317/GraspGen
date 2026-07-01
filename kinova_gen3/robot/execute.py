@@ -85,20 +85,48 @@ def transformation_matrix_to_pose(T):
 def get_current_pose(base_cyclic: BaseCyclicClient):
     """
     Get the current end-effector pose as a 4x4 transformation matrix.
+
+    The pose is expressed in the robot base frame (``T_r_e``).
     
     Args:
         base_cyclic: BaseCyclicClient instance
         
     Returns:
-        4x4 transformation matrix representing current pose
+        4x4 transformation matrix representing current pose in robot base frame
     """
     from .recordDemo import pose_to_transformation_matrix
     
     feedback = base_cyclic.RefreshFeedback()
     pose = feedback.base
-    T_w_e = pose_to_transformation_matrix(pose)
+    T_r_e = pose_to_transformation_matrix(pose)
     
-    return T_w_e
+    return T_r_e
+
+
+def query_world_fingertip_positions(
+    T_w_r: np.ndarray,
+    *,
+    base: Optional[BaseClient] = None,
+    base_cyclic: Optional[BaseCyclicClient] = None,
+    ip: str = "192.168.1.10",
+    username: str = "admin",
+    password: str = "admin",
+    gripper_name: str = "robotiq_2f85",
+    T_tool_gripper: Optional[np.ndarray] = None,
+):
+    """Query live left/right fingertip positions in the calibration world frame."""
+    from .gripper_kinematics import query_live_fingertip_positions
+
+    return query_live_fingertip_positions(
+        T_w_r,
+        base=base,
+        base_cyclic=base_cyclic,
+        ip=ip,
+        username=username,
+        password=password,
+        gripper_name=gripper_name,
+        T_tool_gripper=T_tool_gripper,
+    )
 
 
 def move_to_pose(
@@ -478,6 +506,18 @@ def execute_world_grasp(
         f"rpy=[{grasp_pose['theta_x']:.1f}, {grasp_pose['theta_y']:.1f}, "
         f"{grasp_pose['theta_z']:.1f}] deg"
     )
+
+    try:
+        from .gripper_kinematics import format_tip_positions, query_live_fingertip_positions
+
+        tips = query_live_fingertip_positions(
+            T_w_r,
+            base=base,
+            gripper_name="robotiq_2f85",
+        )
+        print(format_tip_positions(tips))
+    except Exception as exc:  # noqa: BLE001 - best-effort status printout
+        print(f"Warning: could not query fingertip positions: {exc}")
 
     if dry_run:
         print("Dry run: skipping robot motion.")

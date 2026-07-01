@@ -11,7 +11,7 @@ import os
 import time
 import numpy as np
 from typing import List, Dict, Optional
-import utilities
+from kinova_gen3.robot.utilities import DeviceConnection
 
 if sys.version_info.major == 3 and sys.version_info.minor >= 10:   
     import collections
@@ -307,12 +307,12 @@ def record_multiple_demonstrations(
     print(f"Recording {num_demos} demonstrations")
     print(f"{'='*60}\n")
     
-    with utilities.DeviceConnection.createTcpConnection(args) as router:
+    with DeviceConnection.createTcpConnection(args) as router:
         # Create required services
         base = BaseClient(router)
         control_config = ControlConfigClient(router)
         
-        with utilities.DeviceConnection.createUdpConnection(args) as router_realtime:
+        with DeviceConnection.createUdpConnection(args) as router_realtime:
             base_cyclic = BaseCyclicClient(router_realtime)
             
             for i in range(num_demos):
@@ -346,7 +346,7 @@ def main():
     parser.add_argument("--num_demos", type=int, default=1, help="Number of demonstrations to record")
     parser.add_argument("--duration", type=float, default=30.0, help="Maximum duration per demo (seconds)")
     parser.add_argument("--frequency", type=float, default=10.0, help="Recording frequency (Hz)")
-    args = utilities.parseConnectionArguments(parser)
+    args = DeviceConnection.parseConnectionArguments(parser)
     
     # Record demonstrations
     demos = record_multiple_demonstrations(
